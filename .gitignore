@@ -2,3 +2,14 @@
 .box-agent-scratch/
 .DS_Store
 Thumbs.db
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Python (V2+)
+__pycache__/
+*.pyc
+data/indicators/*.csv
+!data/indicators/.gitkeep
