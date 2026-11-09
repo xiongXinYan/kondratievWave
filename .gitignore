@@ -13,3 +13,7 @@ __pycache__/
 *.pyc
 data/indicators/*.csv
 !data/indicators/.gitkeep
+
+# 已迁移至 02-history/ 与 07-personal-strategy/ 的 legacy 文件
+/过去五次康波梳理.md
+/下一次康波应对.md
