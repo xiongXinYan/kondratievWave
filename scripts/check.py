@@ -12,6 +12,9 @@
   4. 是否出现已禁用的表述（概率断言、精确拐点年份）
   5. 归因等级是否残留「A（偏 B）」这类模糊写法
   6. 含「结论失效条件」的研究文件是否已在假设台账登记（覆盖率）
+  7. 月度记录是否含时点口径必备字段（三日期、口径、修订状态）
+  8. 假设台账是否含「重点假设卡片」与九字段可证伪标准
+  9. 是否出现「删除原始记录」类表述（原始记录必须永久保留）
 
 退出码：0 无 error；1 存在 error。
 """
@@ -32,7 +35,7 @@ EXCLUDE_NAMES = {
     "README.md", "CHANGELOG.md", "MIGRATION.md",
     "data-sources.md", "books.md", "academic-papers.md",
     "research-template.md", "monthly-review.md", "quarterly-review.md",
-    "assumptions-ledger.md",
+    "assumptions-ledger.md", "data-protocol.md",
 }
 
 BANNED_PATTERNS = [
@@ -46,15 +49,27 @@ BANNED_PATTERNS = [
 NEGATION_HINTS = ("删除", "移除", "原写", "原文", "不再", "禁止", "禁用",
                   "而非", "不是", "不得", "不许", "已改", "改为", "去模糊", "旧稿")
 
-# 历史记录与模板占位：允许引用已删除的文件
+# 历史记录、模板与规范文件：允许引用已删除的文件 / 使用占位文件名
 LINK_EXEMPT_NAMES = {"MIGRATION.md", "CHANGELOG.md",
-                     "monthly-review.md", "quarterly-review.md"}
+                     "monthly-review.md", "quarterly-review.md",
+                     "data-protocol.md"}
 
 errors = []
 warnings = []
 has_fail_cond = []  # 含「结论失效条件」的研究文件，用于台账覆盖率检查
 
 LEDGER = os.path.join(ROOT, "08-monitoring", "assumptions-ledger.md")
+MONTHLY_DIR = os.path.join(ROOT, "08-monitoring", "reviews", "monthly")
+
+# V1.2：月度记录时点口径必备字段
+PIT_FIELDS = ("指标名称", "当前值", "上期值", "数据所属期",
+              "发布日期", "数据来源", "统计口径", "修订状态")
+# V1.2：假设卡片九字段
+CARD_FIELDS = ("核心假设", "支持证据", "反对证据", "观察指标", "验证期限",
+               "成立条件", "推翻条件", "当前状态", "最近更新日期")
+# 硬禁止：原始记录永久保留（不受 NEGATION_HINTS 豁免，仅认可明确的否定措辞）
+HARD_BANNED = ("删除原始文件", "删除原始记录")
+HARD_OK_HINTS = ("禁止", "不得", "废除", "已废除", "不允许", "不再")
 
 
 def rel(path):
@@ -148,6 +163,17 @@ def main():
                     lineno = text[: m.start()].count("\n") + 1
                     warnings.append(f"{name}:{lineno}: 命中「{label}」→ {m.group(0)!r}")
 
+        # 9 硬禁止：删除原始记录（仅认可明确的否定措辞，其余一律 error）
+        for bad in HARD_BANNED:
+            for m in re.finditer(re.escape(bad), text):
+                line_start = text.rfind("\n", 0, m.start()) + 1
+                line_end = text.find("\n", m.end())
+                line = text[line_start: line_end if line_end != -1 else len(text)]
+                if any(h in line for h in HARD_OK_HINTS):
+                    continue
+                lineno = text[: m.start()].count("\n") + 1
+                errors.append(f"{name}:{lineno}: 出现「{bad}」→ 原始记录必须永久保留，年度只做汇总")
+
     # 6 台账覆盖率：含「结论失效条件」的研究文件必须已在台账登记
     if not os.path.exists(LEDGER):
         errors.append("缺少 08-monitoring/assumptions-ledger.md，失效条件无处登记")
@@ -160,7 +186,36 @@ def main():
             if os.path.basename(name) not in ledger_names:
                 errors.append(f"{name}: 含「结论失效条件」但未在 assumptions-ledger.md 登记")
 
-    print(f"扫描 {len(files)} 个 Markdown 文件 · 台账 {ledger_entries} 条断言 · 需登记文件 {len(has_fail_cond)} 个\n")
+    # 7 月度记录：时点口径字段
+    monthly_count = 0
+    if os.path.isdir(MONTHLY_DIR):
+        for fn in sorted(os.listdir(MONTHLY_DIR)):
+            if not fn.endswith(".md"):
+                continue
+            monthly_count += 1
+            t = open(os.path.join(MONTHLY_DIR, fn), encoding="utf-8").read()
+            missing = [f for f in PIT_FIELDS if f not in t]
+            if missing:
+                warnings.append(
+                    f"08-monitoring/reviews/monthly/{fn}: 缺少时点字段 → {', '.join(missing)}")
+
+    # 8 台账：重点假设卡片与九字段规范
+    card_sections = 0
+    if os.path.exists(LEDGER):
+        lt = open(LEDGER, encoding="utf-8").read()
+        if "重点假设卡片" not in lt:
+            errors.append("08-monitoring/assumptions-ledger.md: 缺少第六节「重点假设卡片」")
+        else:
+            card_part = lt.split("## 六、重点假设卡片", 1)[1]
+            card_sections = len(re.findall(r"^### 6\.\d+ ", card_part, flags=re.M))
+            missing = [f for f in CARD_FIELDS if f not in card_part]
+            if missing:
+                warnings.append(
+                    f"assumptions-ledger.md: 卡片规范缺少字段 → {', '.join(missing)}")
+
+    print(f"扫描 {len(files)} 个 Markdown 文件 · 台账 {ledger_entries} 条断言 · "
+          f"需登记文件 {len(has_fail_cond)} 个 · 月度记录 {monthly_count} 份 · "
+          f"卡片章节 {card_sections} 节\n")
 
     if errors:
         print(f"ERROR ({len(errors)})")
